@@ -131,10 +131,12 @@ def run_web(config_path: str):
             asyncio.set_event_loop(loop)
             result = loop.run_until_complete(engine.run(prompt))
             loop.close()
+            if result.final_answer.startswith("MoA Error"):
+                return f"**Ошибка**: {result.final_answer}\n\nВозможные причины:\n- Достигнут дневной лимит OpenRouter (50 запросов/день). Добавьте $10 кредита для 1000 запросов/день\n- Модели временно недоступны\n- Попробуйте позже"
             models = ", ".join(result.models_used)
             return f"{result.final_answer}\n\n---\nModels: {models} | Time: {result.latency:.1f}s"
         except Exception as e:
-            return f"Error: {e}"
+            return f"**Ошибка**: {e}"
 
     demo = gr.Blocks(title="MoA Engine")
     with demo:

@@ -100,7 +100,7 @@ class OpenAICompatible:
 
         async with httpx.AsyncClient(timeout=120) as c:
             last_err = None
-            for attempt in range(5):
+            for attempt in range(3):
                 try:
                     r = await c.post(
                         f"{self.cfg.base_url}/chat/completions",
@@ -108,10 +108,20 @@ class OpenAICompatible:
                         headers=headers,
                     )
                     if r.status_code == 429:
-                        retry_sec = (2 ** attempt) * 5 + random.uniform(1, 3)
-                        if attempt == 4:
-                            raise ProviderError(f"{self.cfg.name}: rate limited after 5 retries")
-                        print(f"  [429] {self.cfg.name}: retry {attempt+1}/5, waiting {retry_sec:.0f}s")
+                        retry_sec = 10
+                        try:
+                            ra = r.headers.get("Retry-After") or r.headers.get("X-RateLimit-Reset", "")
+                            retry_sec = max(int(float(ra)), 5) if ra else retry_sec
+                        except (ValueError, TypeError):
+                            retry_sec = (2 ** attempt) * 5
+                        if retry_sec > 30:
+                            raise ProviderError(
+                                f"{self.cfg.name}: daily limit ({retry_sec}s). "
+                                f"Add $10 credit on OpenRouter for 1000 req/day"
+                            )
+                        if attempt == 2:
+                            raise ProviderError(f"{self.cfg.name}: rate limited, skip")
+                        print(f"  [429] {self.cfg.name}: retry {attempt+1}/3, wait {retry_sec}s")
                         await asyncio.sleep(retry_sec)
                         continue
                     r.raise_for_status()
@@ -121,7 +131,7 @@ class OpenAICompatible:
                     raise
                 except Exception as e:
                     last_err = e
-                    if attempt == 4:
+                    if attempt == 2:
                         raise ProviderError(f"{self.cfg.name}: {e}")
                     await asyncio.sleep(2 ** attempt)
             raise ProviderError(f"{self.cfg.name}: {last_err or 'all retries exhausted'}")
@@ -156,14 +166,14 @@ class GeminiProvider:
 
         async with httpx.AsyncClient(timeout=120) as c:
             last_err = None
-            for attempt in range(5):
+            for attempt in range(3):
                 try:
                     r = await c.post(url, json=payload)
                     if r.status_code == 429:
-                        retry_sec = (2 ** attempt) * 5 + random.uniform(1, 3)
-                        if attempt == 4:
-                            raise ProviderError(f"{self.cfg.name}: rate limited after 5 retries")
-                        print(f"  [429] {self.cfg.name}: retry {attempt+1}/5, waiting {retry_sec:.0f}s")
+                        retry_sec = (2 ** attempt) * 5
+                        if attempt == 2:
+                            raise ProviderError(f"{self.cfg.name}: rate limited, skip")
+                        print(f"  [429] {self.cfg.name}: retry {attempt+1}/3, wait {retry_sec}s")
                         await asyncio.sleep(retry_sec)
                         continue
                     r.raise_for_status()

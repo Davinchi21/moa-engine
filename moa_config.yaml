@@ -8,39 +8,39 @@ general:
   retry_attempts: 5
 
 proposers:
-  - name: or_nvidia_nano
+  - name: qwen_3_235b
     provider: openrouter
-    model: nvidia/nemotron-3-nano-30b-a3b:free
+    model: qwen/qwen3-235b-a22b:free
     key_env: OPENROUTER_API_KEY
     base_url: https://openrouter.ai/api/v1
     weight: 1.0
 
-  - name: or_nvidia_nano2
+  - name: llama_4_maverick
     provider: openrouter
-    model: nvidia/nemotron-nano-9b-v2:free
+    model: meta-llama/llama-4-maverick:free
     key_env: OPENROUTER_API_KEY
     base_url: https://openrouter.ai/api/v1
     weight: 0.9
 
-  - name: or_nvidia_super
+  - name: gemma_4_27b
     provider: openrouter
-    model: nvidia/nemotron-3-super-120b-a12b:free
+    model: google/gemma-4-27b-it:free
     key_env: OPENROUTER_API_KEY
     base_url: https://openrouter.ai/api/v1
     weight: 0.8
 
 aggregators_layer1:
-  - name: or_poolside_agg
+  - name: deepseek_v3
     provider: openrouter
-    model: poolside/laguna-m.1:free
+    model: deepseek/deepseek-chat-v3-0324:free
     key_env: OPENROUTER_API_KEY
     base_url: https://openrouter.ai/api/v1
     weight: 1.0
 
 final_aggregator:
-  name: or_poolside_final
+  name: llama_3_3_70b
   provider: openrouter
-  model: poolside/laguna-xs.2:free
+  model: meta-llama/llama-3.3-70b-instruct:free
   key_env: OPENROUTER_API_KEY
   base_url: https://openrouter.ai/api/v1
   self_critique: false
