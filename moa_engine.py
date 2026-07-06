@@ -192,7 +192,6 @@ class GeminiProvider:
                         raise ProviderError(f"{self.cfg.name}: {e}")
                     await asyncio.sleep(2 ** attempt)
             raise ProviderError(f"{self.cfg.name}: {last_err or 'all retries exhausted'}")
-            raise ProviderError(f"{self.cfg.name}: all retries exhausted")
 
 class HuggingFaceProvider:
     def __init__(self, cfg: ModelConfig):
