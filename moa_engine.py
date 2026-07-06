@@ -144,7 +144,6 @@ class GeminiProvider:
     async def chat(self, messages: list, temperature=None, max_tokens=None) -> str:
         if not self.api_key:
             raise ProviderError(f"Missing env var: {self.cfg.key_env}")
-        # конвертируем OpenAI-формат в Gemini
         system = ""
         contents = []
         for m in messages:
@@ -153,7 +152,13 @@ class GeminiProvider:
             else:
                 contents.append({"role": m["role"], "parts": [{"text": m["content"]}]})
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.cfg.model}:generateContent?key={self.api_key}"
+        # Gemini API key через заголовок X-goog-api-key
+        headers = {
+            "Content-Type": "application/json",
+            "X-goog-api-key": self.api_key,
+        }
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.cfg.model}:generateContent"
+
         payload = {
             "contents": contents,
             "generationConfig": {
@@ -168,7 +173,7 @@ class GeminiProvider:
             last_err = None
             for attempt in range(3):
                 try:
-                    r = await c.post(url, json=payload)
+                    r = await c.post(url, json=payload, headers=headers)
                     if r.status_code == 429:
                         retry_sec = (2 ** attempt) * 5
                         if attempt == 2:

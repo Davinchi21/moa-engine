@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 MoA System — Entry Point
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -147,7 +147,7 @@ def run_web(config_path: str):
         output = gr.Markdown(label="Answer")
         btn.click(sync_process, inputs=[prompt], outputs=output, api_name=False)
 
-    demo.launch(server_name="127.0.0.1", server_port=7888, share=False, show_error=True)
+    demo.launch(server_name="127.0.0.1", server_port=7889, share=False, show_error=True)
 
 
 if __name__ == "__main__":
