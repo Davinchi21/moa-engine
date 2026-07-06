@@ -163,3 +163,13 @@ moa-engine/
 - `mcp` — MCP протокол (для OpenCode)
 - `python-dotenv` — загрузка .env
 - `gradio` — Web UI (опционально)
+
+## Roadmap
+
+Планы по улучшению: [ROADMAP.md](ROADMAP.md)
+
+Основные направления:
+- **v1.1** — Параллельные вызовы, Groq/DeepSeek модели, streaming
+- **v1.2** — Quality scoring, RAG, multi-turn диалоги
+- **v1.3** — Telegram/Discord боты, Docker, API сервер
+- **v2.0** — Локальные LLM (Ollama), MoA-as-a-Service, бенчмаркинг
