@@ -1,5 +1,5 @@
 # MoA — Multi-layer Mixture of Agents Config
-# Бесплатные модели OpenRouter (2026)
+# OpenRouter free models + Google Gemini (2026)
 
 general:
   temperature: 0.7
@@ -8,6 +8,7 @@ general:
   retry_attempts: 5
 
 proposers:
+  # OpenRouter models (через один API ключ)
   - name: nemotron_super
     provider: openrouter
     model: nvidia/nemotron-3-super-120b-a12b:free
@@ -22,11 +23,17 @@ proposers:
     base_url: https://openrouter.ai/api/v1
     weight: 0.9
 
-  - name: qwen3_next
-    provider: openrouter
-    model: qwen/qwen3-next-80b-a3b-instruct:free
-    key_env: OPENROUTER_API_KEY
-    base_url: https://openrouter.ai/api/v1
+  # Gemini (прямой API, отдельный лимит)
+  - name: gemini_flash
+    provider: gemini
+    model: gemini-2.0-flash
+    key_env: GEMINI_API_KEY
+    weight: 1.0
+
+  - name: gemini_flash_lite
+    provider: gemini
+    model: gemini-2.0-flash-lite
+    key_env: GEMINI_API_KEY
     weight: 0.8
 
 aggregators_layer1:
@@ -36,6 +43,12 @@ aggregators_layer1:
     key_env: OPENROUTER_API_KEY
     base_url: https://openrouter.ai/api/v1
     weight: 1.0
+
+  - name: gemini_15_flash
+    provider: gemini
+    model: gemini-1.5-flash
+    key_env: GEMINI_API_KEY
+    weight: 0.9
 
 final_aggregator:
   name: laguna_xs_2
