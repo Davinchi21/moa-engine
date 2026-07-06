@@ -7,8 +7,13 @@ import re
 import sqlite3
 import time
 import traceback
+import logging
 from dataclasses import dataclass, field
 from typing import Optional
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 import httpx
 import yaml
@@ -390,6 +395,9 @@ class MoAEngine:
         self.cfg = Config(config_path)
         self.cache = MoACache(self.cfg.cache_cfg)
         self.scorer = QualityScorer(self.cfg)
+        
+        # Concurrency control: limit to 3 parallel requests
+        self.semaphore = asyncio.Semaphore(3)
 
         # Инициализация провайдеров
         self.proposers = [build_provider(p) for p in self.cfg.proposers]
@@ -399,137 +407,64 @@ class MoAEngine:
 
     async def run(self, prompt: str, system: str = "You are a helpful assistant.") -> MoAResult:
         start = time.time()
-        models_used = []
-        result = MoAResult(
-            final_answer="",
-            raw_answers={},
-            scores={},
-        )
-
+        
         # ─── Проверка кэша ───
         model_names = [p.cfg.name for p in self.proposers]
         cached = self.cache.get(prompt, system, model_names)
         if cached:
-            result.final_answer = cached
-            result.latency = 0
-            result.models_used = ["cache"]
-            return result
+            return MoAResult(final_answer=cached, raw_answers={}, scores={}, latency=0, models_used=["cache"])
 
-        try:
-            # ═══════════════════════════════════════════
-            # LAYER 0: Последовательный запуск пропозеров
-            # ═══════════════════════════════════════════
-            l0_answers = {}
-            for prov in self.proposers:
-                name, ans = await self._call_safe(prov, system, prompt, prov.cfg.name)
-                models_used.append(prov.cfg.name)
-                if ans:
-                    l0_answers[name] = ans
-                await asyncio.sleep(3)  # пауза между моделями
+        # ─── LAYER 0: Parallel Proposers ───
+        logger.info(f"Starting L0 for prompt: {prompt[:50]}...")
+        tasks = [self._safe_call(prov, system, prompt) for prov in self.proposers]
+        results = await asyncio.gather(*tasks)
+        
+        l0_answers = {p.cfg.name: ans for p, ans in zip(self.proposers, results) if ans}
+        if not l0_answers:
+            raise RuntimeError("All proposers failed")
+        logger.info(f"L0 finished: {len(l0_answers)}/{len(self.proposers)} succeeded")
 
-            result.raw_answers = l0_answers
+        # ─── LAYER 1: Parallel Aggregators ───
+        l1_prompt = self._build_aggregation_prompt(prompt, l0_answers)
+        l1_tasks = [self._safe_call(prov, "You are a critical synthesizer.", l1_prompt) for prov in self.aggregators_l1]
+        l1_results = await asyncio.gather(*l1_tasks)
+        
+        l1_outputs = [{"model": prov.cfg.name, "answer": ans} for prov, ans in zip(self.aggregators_l1, l1_results) if ans]
+        
+        if not l1_outputs:
+            best = max(l0_answers.values(), key=len)
+            return MoAResult(final_answer=best, raw_answers=l0_answers, scores={}, latency=time.time()-start)
 
-            if not l0_answers:
-                raise RuntimeError("Все пропозеры упали")
+        # ─── LAYER 2: Final ───
+        # (Simplified scoring for now)
+        final_prompt = self._build_final_prompt(prompt, l1_outputs)
+        final_answer = await self.final_provider.chat([
+            {"role": "system", "content": "You are a master synthesizer. Produce the best possible final answer."},
+            {"role": "user", "content": final_prompt},
+        ])
 
-            # ═══════════════════════════════════════════
-            # LAYER 1: Аггрегация ответов пропозеров
-            # ═══════════════════════════════════════════
-            l1_prompt = self._build_aggregation_prompt(prompt, l0_answers)
-            l1_outputs = []
-            for prov in self.aggregators_l1:
-                name, ans = await self._call_safe(prov, "You are a critical synthesizer.", l1_prompt, prov.cfg.name)
-                models_used.append(prov.cfg.name)
-                if ans:
-                    l1_outputs.append({"model": name, "answer": ans})
-                await asyncio.sleep(5)
+        return MoAResult(
+            final_answer=final_answer,
+            raw_answers=l0_answers,
+            scores={},
+            latency=time.time() - start,
+            models_used=[p.cfg.name for p in self.proposers + self.aggregators_l1 + [self.cfg.final]]
+        )
 
-            if not l1_outputs:
-                # fallback — берём лучший из Layer 0
-                best = max(l0_answers.values(), key=len)
-                result.final_answer = best
-                result.latency = time.time() - start
-                result.models_used = models_used
-                return result
-
-            result.layer1_outputs = l1_outputs
-
-            # ═══════════════════════════════════════════
-            # QUALITY SCORING Layer 1 (опционально)
-            # ═══════════════════════════════════════════
-            all_l1_texts = [o["answer"] for o in l1_outputs]
-            scored = []
-            if self.scorer and self.cfg.quality_cfg.get("enabled", True):
-                for entry in l1_outputs:
-                    cfg = next((a for a in self.cfg.aggregators_l1 if a.name == entry["model"]), None)
-                    w = cfg.weight if cfg else 1.0
-                    scores = await self.scorer.score(
-                        entry["answer"], all_l1_texts, prompt,
-                        entry["model"], w,
-                    )
-                    scored.append((scores.get("total", 0), entry["model"], entry["answer"]))
-                    result.scores[entry["model"]] = scores
-
-                scored.sort(key=lambda x: x[0], reverse=True)
-            else:
-                # без скоринга — равные веса
-                for i, entry in enumerate(l1_outputs):
-                    scored.append((1.0 - i * 0.01, entry["model"], entry["answer"]))
-
-            top_k = self.cfg.top_k_layer1
-
-            # ═══════════════════════════════════════════
-            # LAYER 2: Финальная аггрегация
-            # ═══════════════════════════════════════════
-            top_answers = scored[:top_k]
-            final_prompt = self._build_final_prompt(prompt, top_answers)
-            final_system = "You are a master synthesizer. Produce the best possible final answer."
-
-            final_answer = await self.final_provider.chat([
-                {"role": "system", "content": final_system},
-                {"role": "user", "content": final_prompt},
-            ])
-            models_used.append(self.cfg.final.name)
-
-            # ═══════════════════════════════════════════
-            # SELF-CRITIQUE (опционально)
-            # ═══════════════════════════════════════════
-            if self.self_critique:
-                final_answer = await self._self_critique(prompt, final_answer, models_used)
-
-            result.final_answer = final_answer
-            result.models_used = models_used
-
-        except Exception as e:
-            traceback.print_exc()
-            # Ultimate fallback
-            if not result.final_answer and result.raw_answers:
-                result.final_answer = max(result.raw_answers.values(), key=len)
-            else:
-                result.final_answer = f"MoA Error: {e}"
-
-        result.latency = time.time() - start
-        # Кэшируем
-        if result.final_answer and "Error" not in result.final_answer:
-            self.cache.set(prompt, system, model_names, result.final_answer)
-        return result
-
-    async def _call_safe(self, provider, system: str, prompt: str, name: str) -> tuple:
-        try:
-            ans = await asyncio.wait_for(
-                provider.chat([
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": prompt},
-                ]),
-                timeout=120.0,
-            )
-            return name, ans
-        except asyncio.TimeoutError:
-            print(f"[WARN] {name} timed out (75s)")
-            return name, None
-        except Exception as e:
-            print(f"[WARN] {name} failed: {e}")
-            return name, None
+    async def _safe_call(self, provider, system: str, prompt: str) -> Optional[str]:
+        async with self.semaphore:
+            try:
+                ans = await asyncio.wait_for(
+                    provider.chat([
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": prompt},
+                    ]),
+                    timeout=120.0,
+                )
+                return ans
+            except Exception as e:
+                logger.warning(f"Model {provider.cfg.name} failed: {e}")
+                return None
 
     def _build_aggregation_prompt(self, original_prompt: str, answers: dict) -> str:
         parts = [f"Original question: {original_prompt}\n"]
