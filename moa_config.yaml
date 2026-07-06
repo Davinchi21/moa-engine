@@ -1,0 +1,67 @@
+# MoA — Multi-layer Mixture of Agents Config
+# Бесплатные модели OpenRouter (2026)
+
+general:
+  temperature: 0.7
+  max_tokens: 4096
+  timeout: 120
+  retry_attempts: 5
+
+proposers:
+  - name: or_nvidia_nano
+    provider: openrouter
+    model: nvidia/nemotron-3-nano-30b-a3b:free
+    key_env: OPENROUTER_API_KEY
+    base_url: https://openrouter.ai/api/v1
+    weight: 1.0
+
+  - name: or_nvidia_nano2
+    provider: openrouter
+    model: nvidia/nemotron-nano-9b-v2:free
+    key_env: OPENROUTER_API_KEY
+    base_url: https://openrouter.ai/api/v1
+    weight: 0.9
+
+  - name: or_nvidia_super
+    provider: openrouter
+    model: nvidia/nemotron-3-super-120b-a12b:free
+    key_env: OPENROUTER_API_KEY
+    base_url: https://openrouter.ai/api/v1
+    weight: 0.8
+
+aggregators_layer1:
+  - name: or_poolside_agg
+    provider: openrouter
+    model: poolside/laguna-m.1:free
+    key_env: OPENROUTER_API_KEY
+    base_url: https://openrouter.ai/api/v1
+    weight: 1.0
+
+final_aggregator:
+  name: or_poolside_final
+  provider: openrouter
+  model: poolside/laguna-xs.2:free
+  key_env: OPENROUTER_API_KEY
+  base_url: https://openrouter.ai/api/v1
+  self_critique: false
+
+quality:
+  enabled: false
+  top_k_layer1: 2
+  metrics:
+    length_weight: 0.15
+    diversity_weight: 0.25
+    model_weight: 0.20
+    coherence_weight: 0.25
+    completeness_weight: 0.15
+  judge_model:
+    name: quality_judge
+    provider: openrouter
+    model: google/gemma-4-26b-a4b-it:free
+    key_env: OPENROUTER_API_KEY
+    base_url: https://openrouter.ai/api/v1
+
+cache:
+  enabled: true
+  ttl_seconds: 3600
+  backend: memory
