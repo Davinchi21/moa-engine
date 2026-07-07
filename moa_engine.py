@@ -180,7 +180,19 @@ class GeminiProvider:
                 try:
                     r = await c.post(url, json=payload, headers=headers)
                     if r.status_code == 429:
-                        retry_sec = (2 ** attempt) * 5
+                        retry_sec = 10
+                        try:
+                            ra = r.headers.get("Retry-After") or r.headers.get("X-RateLimit-Reset", "")
+                            if ra:
+                                ts = int(float(ra))
+                                if ts > 1000000000:
+                                    retry_sec = max(ts - int(time.time()), 5)
+                                else:
+                                    retry_sec = max(ts, 5)
+                        except (ValueError, TypeError):
+                            retry_sec = (2 ** attempt) * 5
+                        if retry_sec > 3600:
+                            raise ProviderError(f"{self.cfg.name}: daily limit, retry later")
                         if attempt == 2:
                             raise ProviderError(f"{self.cfg.name}: rate limited, skip")
                         print(f"  [429] {self.cfg.name}: retry {attempt+1}/3, wait {retry_sec}s")
@@ -193,7 +205,7 @@ class GeminiProvider:
                     raise
                 except Exception as e:
                     last_err = e
-                    if attempt == 4:
+                    if attempt == 2:
                         raise ProviderError(f"{self.cfg.name}: {e}")
                     await asyncio.sleep(2 ** attempt)
             raise ProviderError(f"{self.cfg.name}: {last_err or 'all retries exhausted'}")
